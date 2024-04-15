@@ -24,6 +24,7 @@ public class MyProtocol{
     // The token you received for your frequency range
     String token = "java-34-1TFRGJXZBVMDS6KOI4";
 
+    int id = -1;
     private BlockingQueue<Message> receivedQueue;
     private BlockingQueue<Message> sendingQueue;
 
@@ -32,6 +33,8 @@ public class MyProtocol{
         sendingQueue = new LinkedBlockingQueue<Message>();
 
         new Client(SERVER_IP, SERVER_PORT, frequency, token, receivedQueue, sendingQueue); // Give the client the Queues to use
+
+
 
         new receiveThread(receivedQueue).start(); // Start thread to handle received messages!
 
@@ -45,7 +48,8 @@ public class MyProtocol{
                 if(read > 0){
                     if (temp.get(read-1) == '\n' || temp.get(read-1) == '\r' ) new_line_offset = 1; //Check if last char is a return or newline so we can strip it
                     if (read > 1 && (temp.get(read-2) == '\n' || temp.get(read-2) == '\r') ) new_line_offset = 2; //Check if second to last char is a return or newline so we can strip it
-                    ByteBuffer toSend = ByteBuffer.allocate(read-new_line_offset); // copy data without newline / returns
+                    ByteBuffer toSend = ByteBuffer.allocate(read-new_line_offset + 1); // copy data without newline / returns
+                    toSend.put((byte) (read - new_line_offset + 1));
                     toSend.put( temp.array(), 0, read-new_line_offset ); // enter data without newline / returns
                     Message msg;
                     if( (read-new_line_offset) > 2 ){
@@ -96,6 +100,14 @@ public class MyProtocol{
                     } else if (m.getType() == MessageType.DATA){
                         System.out.print("DATA: ");
                         printByteBuffer( m.getData(), m.getData().capacity() ); //Just print the data
+                        int length = m.getData().get(0);
+                        String text = "";
+                        for(int i = 1; i < length; i++){
+                            text += (char) m.getData().get(i);
+                        }
+                        System.out.println("which gives message: " + text);
+
+
                     } else if (m.getType() == MessageType.DATA_SHORT){
                         System.out.print("DATA_SHORT: ");
                         printByteBuffer( m.getData(), m.getData().capacity() ); //Just print the data
