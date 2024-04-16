@@ -18,7 +18,7 @@ public class MyProtocol{
     // The port to connect to. 8954 for the simulation server.
     private static int SERVER_PORT = 8954;
     // The frequency to use.
-    private static int frequency = 3950;
+    private static int frequency = 3951;
     
     // View the simulator at https://netsys.ewi.utwente.nl/integrationproject/
     // The token you received for your frequency range
