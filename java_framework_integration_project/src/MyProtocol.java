@@ -2,6 +2,8 @@ import client.*;
 
 import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -24,7 +26,8 @@ public class MyProtocol{
     // The token you received for your frequency range
     String token = "java-34-1TFRGJXZBVMDS6KOI4";
 
-    int id = -1;
+    int id = (int) (Math.random() * 255);
+    List<Integer> nodes = new ArrayList<>();
     private BlockingQueue<Message> receivedQueue;
     private BlockingQueue<Message> sendingQueue;
 
@@ -48,8 +51,9 @@ public class MyProtocol{
                 if(read > 0){
                     if (temp.get(read-1) == '\n' || temp.get(read-1) == '\r' ) new_line_offset = 1; //Check if last char is a return or newline so we can strip it
                     if (read > 1 && (temp.get(read-2) == '\n' || temp.get(read-2) == '\r') ) new_line_offset = 2; //Check if second to last char is a return or newline so we can strip it
-                    ByteBuffer toSend = ByteBuffer.allocate(read-new_line_offset + 1); // copy data without newline / returns
-                    toSend.put((byte) (read - new_line_offset + 1));
+                    ByteBuffer toSend = ByteBuffer.allocate(read-new_line_offset + 2); // copy data without newline / returns
+                    toSend.put((byte) id);
+                    toSend.put((byte) (read - new_line_offset + 2));
                     toSend.put( temp.array(), 0, read-new_line_offset ); // enter data without newline / returns
                     Message msg;
                     if( (read-new_line_offset) > 2 ){
@@ -93,6 +97,10 @@ public class MyProtocol{
             while(true) {
                 try{
                     Message m = receivedQueue.take();
+                    if(m.getData() != null && !nodes.contains((int)m.getData().get(0))){
+                        nodes.add((int) m.getData().get(0));
+                    }
+                    System.out.println("known nodes: " + nodes);
                     if (m.getType() == MessageType.BUSY){
                         System.out.println("BUSY");
                     } else if (m.getType() == MessageType.FREE){
@@ -100,12 +108,12 @@ public class MyProtocol{
                     } else if (m.getType() == MessageType.DATA){
                         System.out.print("DATA: ");
                         printByteBuffer( m.getData(), m.getData().capacity() ); //Just print the data
-                        int length = m.getData().get(0);
+                        int length = m.getData().get(1);
                         String text = "";
-                        for(int i = 1; i < length; i++){
+                        for(int i = 2; i < length; i++){
                             text += (char) m.getData().get(i);
                         }
-                        System.out.println("which gives message: " + text);
+                        System.out.println("which gives message : " + text);
 
 
                     } else if (m.getType() == MessageType.DATA_SHORT){
