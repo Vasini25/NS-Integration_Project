@@ -48,20 +48,35 @@ public class MyProtocol{
             int new_line_offset = 0;
             while(true){
                 read = System.in.read(temp.array()); // Get data from stdin, hit enter to send!
-                if(read > 0){
-                    if (temp.get(read-1) == '\n' || temp.get(read-1) == '\r' ) new_line_offset = 1; //Check if last char is a return or newline so we can strip it
-                    if (read > 1 && (temp.get(read-2) == '\n' || temp.get(read-2) == '\r') ) new_line_offset = 2; //Check if second to last char is a return or newline so we can strip it
-                    ByteBuffer toSend = ByteBuffer.allocate(read-new_line_offset + 2); // copy data without newline / returns
-                    toSend.put((byte) id);
-                    toSend.put((byte) (read - new_line_offset + 2));
-                    toSend.put( temp.array(), 0, read-new_line_offset ); // enter data without newline / returns
-                    Message msg;
-                    if( (read-new_line_offset) > 2 ){
-                        msg = new Message(MessageType.DATA, toSend);
+                if(read > 0) {
+
+                    if (temp.get(read - 1) == '\n' || temp.get(read - 1) == '\r')
+                        new_line_offset = 1; //Check if last char is a return or newline so we can strip it
+                    if (read > 1 && (temp.get(read - 2) == '\n' || temp.get(read - 2) == '\r'))
+                        new_line_offset = 2; //Check if second to last char is a return or newline so we can strip it
+                    if (temp.get(0) == '~') {
+                        String command = "";
+                        for(int i = 1; i < read - new_line_offset ; i ++){
+                            command += (char)temp.get(i);
+                        }
+                        if(command.equals("shownodes")){
+                            System.out.println("Currently know nodes: " + nodes);
+                        } else{
+                            //System.out.println( command + " is an invalid command");
+                        }
                     } else {
-                        msg = new Message(MessageType.DATA_SHORT, toSend);
+                        ByteBuffer toSend = ByteBuffer.allocate(read - new_line_offset + 2); // copy data without newline / returns
+                        toSend.put((byte) id);
+                        toSend.put((byte) (read - new_line_offset + 2));
+                        toSend.put(temp.array(), 0, read - new_line_offset); // enter data without newline / returns
+                        Message msg;
+                        if ((read - new_line_offset) > 2) {
+                            msg = new Message(MessageType.DATA, toSend);
+                        } else {
+                            msg = new Message(MessageType.DATA_SHORT, toSend);
+                        }
+                        sendingQueue.put(msg);
                     }
-                    sendingQueue.put(msg);
                 }
             }
         } catch (InterruptedException e){
@@ -100,7 +115,7 @@ public class MyProtocol{
                     if(m.getData() != null && !nodes.contains((int)m.getData().get(0))){
                         nodes.add((int) m.getData().get(0));
                     }
-                    System.out.println("known nodes: " + nodes);
+                    //System.out.println("known nodes: " + nodes);
                     if (m.getType() == MessageType.BUSY){
                         System.out.println("BUSY");
                     } else if (m.getType() == MessageType.FREE){
