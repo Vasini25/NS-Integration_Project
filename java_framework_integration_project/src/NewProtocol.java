@@ -23,7 +23,7 @@ public class NewProtocol {
     private BlockingQueue<Packet> receivedQueuePkt;
     private BlockingQueue<Message> sendingQueue;
     
-    private char id;
+    private byte id;
     
     
     public NewProtocol(String server_ip, int server_port, int frequency)
@@ -35,7 +35,7 @@ public class NewProtocol {
         
         //generate random id
         Random rand = new Random();
-        id = (char) (rand.nextInt(125) + 1);
+        id = (byte) (rand.nextInt(125) + 1);
         System.out.println((int) id);
         
     	new Client(SERVER_IP, SERVER_PORT, frequency, token, receivedQueue, sendingQueue);
@@ -85,7 +85,7 @@ public class NewProtocol {
             System.out.println();
         }
         
-        public void receivePackets()
+        /*public void receivePackets()
         {
         	try {
         		Packet pkt = receivedQueuePkt.take();
@@ -103,7 +103,7 @@ public class NewProtocol {
         	} catch(InterruptedException e) {
         		System.exit(1);
         	}
-        }
+        }*/
         
         //try/catch to receive messages
         public void receiveMessage()
@@ -206,10 +206,10 @@ public class NewProtocol {
                 try {
 					read = (char)System.in.read(temp.array());
 					//read = (char)System.in.read();
-					int dataLength = read-2;
+					byte dataLength = (byte) (read-2);
 					
-					ByteBuffer dataToSend = ByteBuffer.allocate(dataLength);
-					dataToSend.put(temp.array(), 0, dataLength);
+					ByteBuffer dataToSend = ByteBuffer.allocate((int)dataLength);
+					dataToSend.put(temp.array(), 0, (int)dataLength);
 					
 					/*for(int i=0; i<dataLength; i++)
 					{
@@ -221,9 +221,13 @@ public class NewProtocol {
 					{
 						MsgType = MessageType.DATA_SHORT;
 					}
-
+					
+					PacketHeader pHeader = new PacketHeader((byte)0, id, dataLength, (byte)0, (byte)0, (byte)0);
 					Message msg = new Message(MsgType, dataToSend);
-					sendMessage(msg);
+					Packet pkt = new Packet(pHeader, msg);
+					pkt.SendPacket();
+					
+					//sendMessage(msg);
 					
 					Message ack = new Message(MessageType.ACK);
 					
@@ -261,6 +265,23 @@ public class NewProtocol {
     	{
     		return message;
     	}
+    	
+    	public void SendPacket()
+    	{
+    		try {
+    			//send header
+    			for(int i=0; i<=2; i++)
+    			{    				
+    				sendingQueue.put(this.header.getHeaderAsMessages()[i]);
+    			}
+    			
+    			//send actual message
+    			sendingQueue.put(this.message);
+    			
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+    	}
     }
     
     
@@ -268,23 +289,64 @@ public class NewProtocol {
     	private byte sourceAddress;
     	private byte destinationAddress = 0x00;
     	private byte payloadSize;
-    	private PacketType type;
+    	private byte flags;
     	private byte seqNumber;
     	private byte ackNumber;
     	
-    	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, PacketType type, byte seqNumber, byte ackNumber)
+		private byte[] shortDataHeaderPieces;
+		
+		private Message[] headerPieces;
+    	
+    	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, byte flags, byte seqNumber, byte ackNumber)
     	{
     		this.sourceAddress = sourceAddress;
     		this.destinationAddress = destinationAddress;
-    		this.type = type;
+    		this.flags = flags;
     		this.payloadSize = payloadSize;
     		this.seqNumber = seqNumber;
     		this.ackNumber = ackNumber;
+    		
+    		shortDataHeaderPieces = new byte[2];
+    		headerPieces = new Message[3];
+    		
+    		headerPieces = createHeader();
     	}
     	
-    	public PacketType getPacketType()
+    	private Message[] createHeader()
     	{
-    		return type;
+    		Message[] headerPieces = new Message[3];
+    		
+    		//addresses part
+    		shortDataHeaderPieces[0] = sourceAddress;
+    		shortDataHeaderPieces[1] = destinationAddress;
+    		ByteBuffer addresses = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
+    		headerPieces[0] = new Message(MessageType.DATA_SHORT, addresses);
+    		
+    		//type and size of payload part
+    		shortDataHeaderPieces[0] = payloadSize;
+    		shortDataHeaderPieces[1] = flags;
+    		ByteBuffer sizeAndFlags = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
+    		headerPieces[1] = new Message(MessageType.DATA_SHORT, sizeAndFlags);
+    		
+    		//seqNumber and ackNumber part
+    		shortDataHeaderPieces[0] = seqNumber;
+    		shortDataHeaderPieces[1] = ackNumber;
+    		ByteBuffer seqAndAck = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
+    		headerPieces[2] = new Message(MessageType.DATA_SHORT, seqAndAck);
+    		
+    		return headerPieces;
+    		
+    		// to send message = sendingQueue.put(messageToSend);  messageToSend is of type Message
+        	// Message msg = new Message(MsgType, dataToSend);  ByteBuffer dataToSend = ByteBuffer.allocate(dataLength); dataToSend.put(temp.array(), 0, dataLength);
+    	}
+    	public Message[] getHeaderAsMessages()
+    	{
+    		return headerPieces;
+    	}
+    	
+    	public byte getFlags()
+    	{
+    		return flags;
     	}
     	
     	public byte getPayloadSize()
@@ -311,6 +373,8 @@ public class NewProtocol {
     	{
     		return destinationAddress;
     	}
+    	
+    	
     }
     
     public enum PacketType {
