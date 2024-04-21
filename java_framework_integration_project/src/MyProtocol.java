@@ -20,7 +20,7 @@ public class MyProtocol{
     // The port to connect to. 8954 for the simulation server.
     private static int SERVER_PORT = 8955;
     // The frequency to use.
-    private static int frequency = 3979;
+    private static int frequency = 3978;
 
     private int id = (int) (Math.random() * 254) + 1;
 
@@ -129,7 +129,7 @@ public class MyProtocol{
                                     //System.out.println(newAck);
                                     //System.out.println(Byte.toUnsignedInt(msg.getData().get(3)));
                                     if (newAck == Byte.toUnsignedInt(msg.getData().get(3))) {
-                                        System.out.println("message has been acknowledged");
+                                        System.out.println("the recipient has received the message");
                                         newAck = 0;
                                         acknowledged = true;
                                     }
@@ -527,7 +527,7 @@ public class MyProtocol{
                     } else if (m.getType() == MessageType.DONE_SENDING){
                         //System.out.println("DONE_SENDING");
                     } else if (m.getType() == MessageType.HELLO){
-                        System.out.println("HELLO");
+                        //System.out.println("HELLO");
                     } else if (m.getType() == MessageType.SENDING){
                         //System.out.println("SENDING");
                     } else if (m.getType() == MessageType.END){
