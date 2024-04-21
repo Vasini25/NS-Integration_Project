@@ -8,6 +8,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 import javax.sound.midi.SysexMessage;
 
+
 public class NewProtocol {
 	
 	// Setting the server IP, the port and the frequency numbers
@@ -24,6 +25,7 @@ public class NewProtocol {
     private BlockingQueue<Message> sendingQueue;
     
     private byte id;
+    
     
     
     public NewProtocol(String server_ip, int server_port, int frequency)
@@ -72,6 +74,10 @@ public class NewProtocol {
         private byte flag;
         private byte seqN;
         private byte ackN;
+        private byte ttl;
+        private byte frag;
+        
+        private boolean isAck;
         
         //constructor, will also call method run()
         public receiveThread(BlockingQueue<Message> receivedQueue, BlockingQueue<Packet> receivedQueuePkt){
@@ -123,45 +129,87 @@ public class NewProtocol {
             		
             	//managing receiving data and short data
             	case DATA:
+            		ttl--;
+            		
             		//check if message is for this node
             		if(dst == id || dst == 0)
-    				{    					
+            		{
+            			System.out.println();
             			System.out.print("DATA! => ");
             			printReceivedMessage(msg.getData(), this.size);
+            			System.out.println();
+            			System.out.println("___________________________________________________");
+            			System.out.println();
+            			
+            			ttl = 0;
+            			Packet pktAck = new Packet(new PacketHeader(dst, src, (byte)0, (byte)1, seqN, ackN));
+            			pktAck.SendPacket();
     				}
+            		else if(ttl > 0)
+            		{
+            			Packet pktToBeRetrForwarded = new Packet(new PacketHeader(src, dst, size, flag, seqN, ackN, ttl), msg);
+            			pktToBeRetrForwarded.SendPacket();
+            		}
+            		
             		isHeader = true;
             		break;
             	case DATA_SHORT:
-            		System.out.print("SHORT DATA! => ");
-            		printReceivedMessage(msg.getData(), msg.getData().capacity());
             		if(isHeader)
             		{
             			switch(headerPart)
             			{
             			case 1:
+            				System.out.println();
+            				System.out.println("PACKET RECEIVED --> ");
+            				System.out.println("___________________________________________________");
+            				
             				this.src = msg.getData().get(0);
             				this.dst = msg.getData().get(1);
-            				System.out.println(this.src + " " + this.dst);
+            				System.out.println("source: " + this.src + "   |   destination: " + this.dst);
             				headerPart++;
             				break;
             				
             			case 2:
             				this.size = msg.getData().get(0);
             				this.flag = msg.getData().get(1);
-            				System.out.println((int)this.size + " " + this.flag);
+            				System.out.println("size: " + this.size + "   |   flags : " + this.flag);
             				headerPart++;
+            				
+            				if(flag == 1) {
+            					isAck = true;
+            				}
             				break;
             				
             			case 3:
             				this.seqN = msg.getData().get(0);
             				this.ackN = msg.getData().get(1);
-            				System.out.println(this.seqN + " " + this.ackN);
+            				System.out.println("sequence number: " + this.seqN + "   |   acknoledgement number: " + this.ackN);
+            				headerPart++;
+            				break;
             				
+            			case 4:
+            				this.ttl = msg.getData().get(0);
+            				this.frag = msg.getData().get(1);
+            				System.out.println("time to live: " + this.ttl + "   |   fragment: " + this.frag);
+            				System.out.println("---------------------------------------------------");
+            				
+            				if(isAck) {
+            					System.out.println();
+                				System.out.println("ACK! ");
+                				System.out.println("___________________________________________________");
+            					isAck = false;
+            				}
             				headerPart = 1;
             				isHeader = false;
             				break;
-            			}
+            			}            			
             		}
+            		else
+            		{
+            			System.out.print("SHORT DATA! => ");
+            			printReceivedMessage(msg.getData(), msg.getData().capacity());
+            		}
+            		
             		break;
             	
             	//to manage received messages about the channel/buffer
@@ -226,23 +274,6 @@ public class NewProtocol {
             System.out.println();
         }
         
-        public void SendPacket(Packet pkt)
-    	{
-    		try {
-    			//send header
-    			for(int i=0; i<=2; i++)
-    			{
-    				sendingQueue.put(pkt.header.getHeaderPart(i));
-    			}
-    			
-    			//send actual message
-    			sendingQueue.put(pkt.message);
-    			
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-    	}
-        
         public void run(){
         	
         	//constantly try to get an input and 
@@ -252,14 +283,31 @@ public class NewProtocol {
                 try {
 					read = (char)System.in.read(temp.array());
 					//read = (char)System.in.read();
-					byte dataLength = (byte) (read-2);
+					byte dataLength = (byte) (read-3);
 					
 					//get destination in the last byte and convert for ascii
-					byte destinationAddrr = temp.get(dataLength - 1);
-					destinationAddrr -= 48;
-					dataLength--;
-					System.out.println(destinationAddrr);
-					
+		        	byte destinationAddrr = temp.get(dataLength);
+		        	destinationAddrr -= 48;
+		        	dataLength--;
+		        	
+		        	//check if the address has tens
+		        	if(temp.get(dataLength) >= 48 && temp.get(dataLength) <= 57)
+		        	{
+			        	byte other = temp.get(dataLength);
+			        	other -= 48;
+			        	destinationAddrr += other*10;
+			        	dataLength--;
+			        	
+			        	//check if the address has hundreds
+			        	if(temp.get(dataLength) >= 48 && temp.get(dataLength) <= 57)
+			        	{
+			        		other = temp.get(dataLength);
+			        		other -= 48;
+			        		destinationAddrr += other*100;
+			        	}
+		        	}
+		        	
+					//put the rest of the data in the buffer
 					ByteBuffer dataToSend = ByteBuffer.allocate((int)dataLength);
 					dataToSend.put(temp.array(), 0, (int)dataLength);
 					
@@ -269,10 +317,10 @@ public class NewProtocol {
 						MsgType = MessageType.DATA_SHORT;
 					}
 					
-					PacketHeader pHeader = new PacketHeader((byte)id, destinationAddrr, (byte)dataLength, (byte)0, (byte)0, (byte)0);
+					PacketHeader pHeader = new PacketHeader(id, destinationAddrr, dataLength, (byte)0, (byte)0, (byte)0);
 					Message msg = new Message(MsgType, dataToSend);
 					Packet pkt = new Packet(pHeader, msg);
-					SendPacket(pkt);
+					pkt.SendPacket();
 					
 					Message ack = new Message(MessageType.ACK);
 					
@@ -310,20 +358,42 @@ public class NewProtocol {
     	{
     		return message;
     	}
+    	
+    	public void SendPacket()
+    	{
+    		try {
+    			//send header
+    			for(int i=0; i<this.getHeader().getHeaderSize(); i++)
+    			{
+    				sendingQueue.put(this.header.getHeaderPart(i));
+    			}
+    			
+    			//send actual message
+    			if(message != null)
+    				sendingQueue.put(this.message);
+    			
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+    	}
     }
     
     
     public class PacketHeader {
+    	private int headerSize = 4;
+    	
     	private byte sourceAddress;
     	private byte destinationAddress = 0x00;
     	private byte payloadSize;
     	private byte flags;
     	private byte seqNumber;
     	private byte ackNumber;
+    	private byte ttl; 
+    	private byte frag;
     	
 		private byte[] shortDataHeaderPieces = new byte[2];
 		
-		private Message[] headerPieces = new Message[3];
+		private Message[] headerPieces = new Message[headerSize];
     	
     	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, byte flags, byte seqNumber, byte ackNumber)
     	{
@@ -333,6 +403,25 @@ public class NewProtocol {
     		this.flags = flags;
     		this.seqNumber = seqNumber;
     		this.ackNumber = ackNumber;
+    		
+    		this.ttl = 4;
+    		this.frag = 0;
+    		
+    		createHeader();
+    	}
+    	
+    	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, byte flags, 
+    			byte seqNumber, byte ackNumber, byte ttl)
+    	{
+    		this.sourceAddress = sourceAddress;
+    		this.destinationAddress = destinationAddress;
+    		this.payloadSize = payloadSize;
+    		this.flags = flags;
+    		this.seqNumber = seqNumber;
+    		this.ackNumber = ackNumber;
+    		
+    		this.ttl = ttl;
+    		this.frag = 0;
     		
     		createHeader();
     	}
@@ -360,6 +449,12 @@ public class NewProtocol {
     		seqAndAck.put(shortDataHeaderPieces);
     		this.headerPieces[2] = new Message(MessageType.DATA_SHORT, seqAndAck);
     		
+    		shortDataHeaderPieces[0] = ttl;
+    		shortDataHeaderPieces[1] = frag;
+    		ByteBuffer ttlAndFrag = ByteBuffer.allocate(2);
+    		ttlAndFrag.put(shortDataHeaderPieces);
+    		this.headerPieces[3] = new Message(MessageType.DATA_SHORT, ttlAndFrag);
+    		
     		// to send message = sendingQueue.put(messageToSend);  messageToSend is of type Message
         	// Message msg = new Message(MsgType, dataToSend);  ByteBuffer dataToSend = ByteBuffer.allocate(dataLength); dataToSend.put(temp.array(), 0, dataLength);
     	}
@@ -373,9 +468,9 @@ public class NewProtocol {
     		return headerPieces[index];
     	}
     	
-    	public ByteBuffer getInfo(Message msg)
+    	public int getHeaderSize()
     	{
-    		return msg.getData();
+    		return headerSize;
     	}
     	
     	public byte getFlags()
@@ -413,6 +508,7 @@ public class NewProtocol {
     
     public enum PacketType {
     	DATA,
-    	ACK
+    	ACK,
+    	FRAG
     }
 }
