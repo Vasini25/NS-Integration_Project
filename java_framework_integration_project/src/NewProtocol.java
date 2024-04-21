@@ -142,7 +142,7 @@ public class NewProtocol {
             			System.out.println();
             			
             			ttl = 0;
-            			Packet pktAck = new Packet(new PacketHeader(dst, src, (byte)0, (byte)1, seqN, ackN));
+            			Packet pktAck = new Packet(new PacketHeader(dst, src, (byte)0, (byte)1, seqN, (byte)(seqN + size)));
             			pktAck.SendPacket();
     				}
             		else if(ttl > 0)
@@ -317,7 +317,7 @@ public class NewProtocol {
 						MsgType = MessageType.DATA_SHORT;
 					}
 					
-					PacketHeader pHeader = new PacketHeader(id, destinationAddrr, dataLength, (byte)0, (byte)0, (byte)0);
+					PacketHeader pHeader = new PacketHeader(id, destinationAddrr, dataLength, (byte)0, (byte)1, (byte)0);
 					Message msg = new Message(MsgType, dataToSend);
 					Packet pkt = new Packet(pHeader, msg);
 					pkt.SendPacket();
