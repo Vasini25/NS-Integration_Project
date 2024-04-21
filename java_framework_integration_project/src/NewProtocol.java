@@ -38,7 +38,7 @@ public class NewProtocol {
         //generate random id
         Random rand = new Random();
         id = (byte) (rand.nextInt(125) + 1);
-        System.out.println((int) id);
+        System.out.println("My address is: " + (int) id);
         
     	new Client(SERVER_IP, SERVER_PORT, frequency, token, receivedQueue, sendingQueue);
     	
@@ -317,12 +317,37 @@ public class NewProtocol {
 						MsgType = MessageType.DATA_SHORT;
 					}
 					
-					PacketHeader pHeader = new PacketHeader(id, destinationAddrr, dataLength, (byte)0, (byte)1, (byte)0);
-					Message msg = new Message(MsgType, dataToSend);
-					Packet pkt = new Packet(pHeader, msg);
-					pkt.SendPacket();
+					//deal with fragmentation
+					int numberOfFragments = (dataLength/32) + 1;
+					int seq = 1;
+					int flag = 0;
+					if(numberOfFragments > 1)
+					{
+						flag = 2;
+					}
 					
-					Message ack = new Message(MessageType.ACK);
+					int offset = 0;
+					int length = 32;
+					for(int i=1; i<=numberOfFragments; i++)
+					{
+						if(i==numberOfFragments)
+						{
+							length = dataLength%32;
+						}
+						ByteBuffer dataInMessage = ByteBuffer.allocate(32);
+						dataInMessage.put(temp.array(), offset, length);
+						
+						PacketHeader pHeader = new PacketHeader(id, destinationAddrr, (byte)length, (byte)flag, (byte)(seq), (byte)0, (byte)4, (byte)i);
+						Message msg = new Message(MsgType, dataInMessage);
+						Packet pkt = new Packet(pHeader, msg);
+						
+						seq += length;
+						offset += length;
+						
+						pkt.SendPacket();
+					}
+					
+					
 					
 				} catch (IOException e) {
 					System.out.println("Failed to read from input: "+e);
@@ -422,6 +447,22 @@ public class NewProtocol {
     		
     		this.ttl = ttl;
     		this.frag = 0;
+    		
+    		createHeader();
+    	}
+    	
+    	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, byte flags, 
+    			byte seqNumber, byte ackNumber, byte ttl, byte frag)
+    	{
+    		this.sourceAddress = sourceAddress;
+    		this.destinationAddress = destinationAddress;
+    		this.payloadSize = payloadSize;
+    		this.flags = flags;
+    		this.seqNumber = seqNumber;
+    		this.ackNumber = ackNumber;
+    		
+    		this.ttl = ttl;
+    		this.frag = frag;
     		
     		createHeader();
     	}
