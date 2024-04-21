@@ -22,4 +22,8 @@ public class Message {
     public ByteBuffer getData(){
         return data;
     }
+
+    public byte getFlags(){return data.get(1);}
+
+    public int getId(){return Byte.toUnsignedInt(data.get(0));}
 }
