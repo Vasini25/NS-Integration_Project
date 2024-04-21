@@ -63,6 +63,16 @@ public class NewProtocol {
         private BlockingQueue<Message> receivedQueue;
         private BlockingQueue<Packet> receivedQueuePkt;
         
+        private boolean isHeader = true;
+        private int headerPart = 1;
+        
+        private byte src;
+        private byte dst;
+        private byte size;
+        private byte flag;
+        private byte seqN;
+        private byte ackN;
+        
         //constructor, will also call method run()
         public receiveThread(BlockingQueue<Message> receivedQueue, BlockingQueue<Packet> receivedQueuePkt){
             super();
@@ -84,26 +94,6 @@ public class NewProtocol {
             }
             System.out.println();
         }
-        
-        /*public void receivePackets()
-        {
-        	try {
-        		Packet pkt = receivedQueuePkt.take();
-        		switch(pkt.getHeader().getPacketType())
-        		{
-        		case ACK:
-        			System.out.println("PKT ACK");
-        			break;
-        			
-        		default: 
-        			System.out.println("Packet received" + pkt.getHeader().getPacketType());
-        			receiveMessage();
-        			break;
-        		}
-        	} catch(InterruptedException e) {
-        		System.exit(1);
-        	}
-        }*/
         
         //try/catch to receive messages
         public void receiveMessage()
@@ -133,13 +123,45 @@ public class NewProtocol {
             		
             	//managing receiving data and short data
             	case DATA:
-            		System.out.print("DATA! => ");
-            		printReceivedMessage(msg.getData(), msg.getData().capacity());
-            		
+            		//check if message is for this node
+            		if(dst == id || dst == 0)
+    				{    					
+            			System.out.print("DATA! => ");
+            			printReceivedMessage(msg.getData(), this.size);
+    				}
+            		isHeader = true;
             		break;
             	case DATA_SHORT:
             		System.out.print("SHORT DATA! => ");
             		printReceivedMessage(msg.getData(), msg.getData().capacity());
+            		if(isHeader)
+            		{
+            			switch(headerPart)
+            			{
+            			case 1:
+            				this.src = msg.getData().get(0);
+            				this.dst = msg.getData().get(1);
+            				System.out.println(this.src + " " + this.dst);
+            				headerPart++;
+            				break;
+            				
+            			case 2:
+            				this.size = msg.getData().get(0);
+            				this.flag = msg.getData().get(1);
+            				System.out.println((int)this.size + " " + this.flag);
+            				headerPart++;
+            				break;
+            				
+            			case 3:
+            				this.seqN = msg.getData().get(0);
+            				this.ackN = msg.getData().get(1);
+            				System.out.println(this.seqN + " " + this.ackN);
+            				
+            				headerPart = 1;
+            				isHeader = false;
+            				break;
+            			}
+            		}
             		break;
             	
             	//to manage received messages about the channel/buffer
@@ -197,6 +219,30 @@ public class NewProtocol {
 			}
         }
         
+        public void printByteBuffer(ByteBuffer bytes, int bytesLength){
+            for(int i=0; i<bytesLength; i++){
+                System.out.print( Byte.toString( bytes.get(i) )+" " );
+            }
+            System.out.println();
+        }
+        
+        public void SendPacket(Packet pkt)
+    	{
+    		try {
+    			//send header
+    			for(int i=0; i<=2; i++)
+    			{
+    				sendingQueue.put(pkt.header.getHeaderPart(i));
+    			}
+    			
+    			//send actual message
+    			sendingQueue.put(pkt.message);
+    			
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+    	}
+        
         public void run(){
         	
         	//constantly try to get an input and 
@@ -208,13 +254,14 @@ public class NewProtocol {
 					//read = (char)System.in.read();
 					byte dataLength = (byte) (read-2);
 					
+					//get destination in the last byte and convert for ascii
+					byte destinationAddrr = temp.get(dataLength - 1);
+					destinationAddrr -= 48;
+					dataLength--;
+					System.out.println(destinationAddrr);
+					
 					ByteBuffer dataToSend = ByteBuffer.allocate((int)dataLength);
 					dataToSend.put(temp.array(), 0, (int)dataLength);
-					
-					/*for(int i=0; i<dataLength; i++)
-					{
-						System.out.println(dataToSend.get(i));
-					}*/
 					
 					MessageType MsgType = MessageType.DATA;
 					if(dataLength <= 2)
@@ -222,12 +269,10 @@ public class NewProtocol {
 						MsgType = MessageType.DATA_SHORT;
 					}
 					
-					PacketHeader pHeader = new PacketHeader((byte)0, id, dataLength, (byte)0, (byte)0, (byte)0);
+					PacketHeader pHeader = new PacketHeader((byte)id, destinationAddrr, (byte)dataLength, (byte)0, (byte)0, (byte)0);
 					Message msg = new Message(MsgType, dataToSend);
 					Packet pkt = new Packet(pHeader, msg);
-					pkt.SendPacket();
-					
-					//sendMessage(msg);
+					SendPacket(pkt);
 					
 					Message ack = new Message(MessageType.ACK);
 					
@@ -265,23 +310,6 @@ public class NewProtocol {
     	{
     		return message;
     	}
-    	
-    	public void SendPacket()
-    	{
-    		try {
-    			//send header
-    			for(int i=0; i<=2; i++)
-    			{    				
-    				sendingQueue.put(this.header.getHeaderAsMessages()[i]);
-    			}
-    			
-    			//send actual message
-    			sendingQueue.put(this.message);
-    			
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-    	}
     }
     
     
@@ -293,48 +321,44 @@ public class NewProtocol {
     	private byte seqNumber;
     	private byte ackNumber;
     	
-		private byte[] shortDataHeaderPieces;
+		private byte[] shortDataHeaderPieces = new byte[2];
 		
-		private Message[] headerPieces;
+		private Message[] headerPieces = new Message[3];
     	
     	public PacketHeader(byte sourceAddress, byte destinationAddress, byte payloadSize, byte flags, byte seqNumber, byte ackNumber)
     	{
     		this.sourceAddress = sourceAddress;
     		this.destinationAddress = destinationAddress;
-    		this.flags = flags;
     		this.payloadSize = payloadSize;
+    		this.flags = flags;
     		this.seqNumber = seqNumber;
     		this.ackNumber = ackNumber;
     		
-    		shortDataHeaderPieces = new byte[2];
-    		headerPieces = new Message[3];
-    		
-    		headerPieces = createHeader();
+    		createHeader();
     	}
     	
-    	private Message[] createHeader()
-    	{
-    		Message[] headerPieces = new Message[3];
-    		
+    	private void createHeader()
+    	{	
     		//addresses part
     		shortDataHeaderPieces[0] = sourceAddress;
     		shortDataHeaderPieces[1] = destinationAddress;
-    		ByteBuffer addresses = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
-    		headerPieces[0] = new Message(MessageType.DATA_SHORT, addresses);
+    		ByteBuffer addresses = ByteBuffer.allocate(2);
+    		addresses.put(shortDataHeaderPieces);
+    		this.headerPieces[0] = new Message(MessageType.DATA_SHORT, addresses);
     		
     		//type and size of payload part
     		shortDataHeaderPieces[0] = payloadSize;
     		shortDataHeaderPieces[1] = flags;
-    		ByteBuffer sizeAndFlags = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
-    		headerPieces[1] = new Message(MessageType.DATA_SHORT, sizeAndFlags);
+    		ByteBuffer sizeAndFlags = ByteBuffer.allocate(2);
+    		sizeAndFlags.put(shortDataHeaderPieces);
+    		this.headerPieces[1] = new Message(MessageType.DATA_SHORT, sizeAndFlags);
     		
     		//seqNumber and ackNumber part
     		shortDataHeaderPieces[0] = seqNumber;
     		shortDataHeaderPieces[1] = ackNumber;
-    		ByteBuffer seqAndAck = ByteBuffer.wrap(shortDataHeaderPieces, 0, 2);
-    		headerPieces[2] = new Message(MessageType.DATA_SHORT, seqAndAck);
-    		
-    		return headerPieces;
+    		ByteBuffer seqAndAck = ByteBuffer.allocate(2);
+    		seqAndAck.put(shortDataHeaderPieces);
+    		this.headerPieces[2] = new Message(MessageType.DATA_SHORT, seqAndAck);
     		
     		// to send message = sendingQueue.put(messageToSend);  messageToSend is of type Message
         	// Message msg = new Message(MsgType, dataToSend);  ByteBuffer dataToSend = ByteBuffer.allocate(dataLength); dataToSend.put(temp.array(), 0, dataLength);
@@ -342,6 +366,16 @@ public class NewProtocol {
     	public Message[] getHeaderAsMessages()
     	{
     		return headerPieces;
+    	}
+    	
+    	public Message getHeaderPart(int index)
+    	{
+    		return headerPieces[index];
+    	}
+    	
+    	public ByteBuffer getInfo(Message msg)
+    	{
+    		return msg.getData();
     	}
     	
     	public byte getFlags()
