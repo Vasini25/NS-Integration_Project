@@ -3,9 +3,11 @@ import client.*;
 import java.nio.ByteBuffer;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * This is just some example code to show you how to interact
@@ -20,15 +22,17 @@ public class MyProtocol{
     // The port to connect to. 8954 for the simulation server.
     private static int SERVER_PORT = 8955;
     // The frequency to use.
-    private static int frequency = 3978;
+    private static int frequency = 3932;
 
-    private int id = (int) (Math.random() * 254) + 1;
+    private int id =(int) (Math.random() * 254) + 1;
 
-    private List<Node> nodeslist = new ArrayList<>();
+    private List<Node> nodeslist = Collections.synchronizedList( new ArrayList<>());
 
     private Message nextMessage = null;
 
     private MessageType lastMessage;
+
+    private Message lastReceivedMessage = null;
 
     private int nextMessageId = 0;
 
@@ -51,14 +55,17 @@ public class MyProtocol{
 
         new receiveThread(receivedQueue).start(); // Start thread to handle received messages!
 
+        new keepAliveThread().start();
+
         nodeslist.add(new Node(id));
+
 
         // handle sending from stdin from this thread.
         try{
 
             //Thread.sleep(2000);
-            Message test = createShortMessage((byte) 0b10000000);
-            sendingQueue.put(test);
+            //Message test = createShortMessage((byte) 0b10000000);
+            //sendingQueue.put(test);
             System.out.println("Welcome to the underwater chat, you are node: " + id);
             System.out.println("To send a message to all nearby nodes, simply type the message");
             System.out.println("If you want to send a message to a specific connected node type: ~message [nodenumber]");
@@ -81,14 +88,21 @@ public class MyProtocol{
                         }
                         String[] commands = command.split(" ");
                         if(command.equals("connected")){
-                            System.out.print("Connected nodes are: " );
-                            for(Node node : nodeslist){
-                                System.out.println(node.getId() + ", with nexthop: " + node.getNextHop());
-                            }
-                        } else if(command.equals("lookfornodes")){ // for manually searching for nodes
-                            sendingQueue.put(test);
+                            System.out.println("Connected nodes are: " );
 
-                        }else if(commands[0].equals("message")){ // for sending a message to a specific user
+                            for (Node node : nodeslist) {
+                                if(node.getId() != id) {
+                                    System.out.println(node.getId() + ", with nexthop: " + node.getNextHop() +
+                                                               ", with a lastheard value of: " +
+                                                               node.getLastHeard());
+                                }
+                            }
+
+                        } //else if(command.equals("lookfornodes")){ // for manually searching for nodes
+                        //sendingQueue.put(test);
+
+                        // }
+                        else if(commands[0].equals("message")){ // for sending a message to a specific user
                             nextMessageId = Integer.parseInt(commands[1]);
                             System.out.println("sending next message to: " + commands[1]);
                         }else {
@@ -107,12 +121,14 @@ public class MyProtocol{
 
                         Message msg;
                         int nextHop = 0;
-                        for(Node node : nodeslist){
-                            if(node.getId() == nextMessageId){
+
+                        for (Node node : nodeslist) {
+                            if (node.getId() == nextMessageId) {
                                 nextHop = node.getNextHop();
                                 break;
                             }
                         }
+
                         if(nextMessageId != 0 && nextHop == 0){
                             System.out.println("This node is not known!");
                             nextMessageId = 0;
@@ -129,7 +145,7 @@ public class MyProtocol{
                                     //System.out.println(newAck);
                                     //System.out.println(Byte.toUnsignedInt(msg.getData().get(3)));
                                     if (newAck == Byte.toUnsignedInt(msg.getData().get(3))) {
-                                        System.out.println("the recipient has received the message");
+                                        System.out.println("message has been acknowledged");
                                         newAck = 0;
                                         acknowledged = true;
                                     }
@@ -137,19 +153,26 @@ public class MyProtocol{
                                         sendingQueue.put(msg);
                                         cooldown = 100;
                                         //System.out.println(cooldown);
+                                    } else if ( cooldown <= 0){
+                                        cooldown = 100;
+                                        //System.out.println(cooldown + " busy");
                                     }
-                                    if (cooldown > 0) {
+                                    if (cooldown >= 0) {
+                                        //System.out.println(cooldown);
                                         cooldown--;
                                         Thread.sleep(100);
                                     }
                                 }
                             } else{
                                 List<Integer> a = new ArrayList<>();
-                                for(Node node : nodeslist){
-                                    if(node.getId() == node.getNextHop() || node.getNextHop() == 0){
+
+                                for (Node node : nodeslist) {
+                                    if (node.getId() == node.getNextHop() ||
+                                            node.getNextHop() == 0) {
                                         a.add(node.getId());
                                     }
                                 }
+
                                 int[] b = new int[a.size()];
                                 for(int i = 0 ; i < a.size(); i++){
                                     b[i] = a.get(i);
@@ -190,6 +213,8 @@ public class MyProtocol{
 
         return result;
     }
+
+    //public Message createKeepAliveMessage()
 
     public Message createBroadcast(ByteBuffer data, int[] oldNodes, int nextNode){
         Message result;
@@ -232,15 +257,20 @@ public class MyProtocol{
 
     public Message createListMessage(int receiver, int origin){
         int read = 0;
-        for(Node node : nodeslist){
-            read ++;
+
+        for (Node node : nodeslist) {
+            read += 2;
         }
 
+
         ByteBuffer data = ByteBuffer.allocate(read + 1);
+
         data.put((byte) origin);
-        for(Node node : nodeslist){
+        for (Node node : nodeslist) {
             data.put((byte) node.getId());
+            data.put((byte) node.getNextHop());
         }
+
 
         return createDataMessage(data, (byte) 0b10000000, receiver, receiver);
     }
@@ -264,6 +294,7 @@ public class MyProtocol{
             while(true) {
                 try{
                     Message m = receivedQueue.take();
+
                     if (m.getType() == MessageType.BUSY){
                         //System.out.println("BUSY");
                         lastMessage = MessageType.BUSY;
@@ -281,10 +312,19 @@ public class MyProtocol{
                         int senderId = m.getId();
                         byte flags = m.getFlags();
                         boolean newNode = true;
+
+                        if(senderId == id){
+                            id = (int)(Math.random() * 254) + 1;
+                            System.out.println("your node number got taken by another node, your new id is: " + id);
+                            nodeslist.set(0, new Node(id));
+                        }
+
                         for (Node node : nodeslist) {
                             if (node.getId() == senderId) {
+                                node.setLastHeard(5);
+                                nodeslist.set(nodeslist.indexOf(node), node);
                                 newNode = false;
-                                if(node.getNextHop() != senderId){
+                                if (node.getNextHop() != senderId) {
                                     //System.out.println("route without hops found to: " + senderId);
                                     nodeslist.remove(node);
                                     newNode = true;
@@ -295,9 +335,11 @@ public class MyProtocol{
                         if (newNode) {
                             Node node = new Node(senderId);
                             node.setNextHop(senderId);
+                            node.setLastHeard(5);
                             //System.out.println("new node: " + senderId);
                             nodeslist.add(node);
                         }
+
                         if(flags == 0b00000000 || flags == 0b01000000) {
                             if(Byte.toUnsignedInt( m.getData().get(2)) == id){
                                 if(Byte.toUnsignedInt( m.getData().get(3)) == id){
@@ -310,13 +352,21 @@ public class MyProtocol{
                                         System.out.println("Received broadcast: " + message + ", from node " + Byte.toUnsignedInt(m.getData().get(5)));
                                     } else*/
                                     if(flags == 0b00000000) {
-                                        System.out.println("Received message: " + message + ", from node " + Byte.toUnsignedInt(m.getData().get(5)));
+                                        if(m != lastReceivedMessage) {
+                                            System.out.println("Received message: " + message +
+                                                                       ", from node " + Byte.toUnsignedInt(
+                                                    m.getData().get(5)));
+                                            lastReceivedMessage = m;
+                                        }
                                         int nextHop = 0;
-                                        for(Node node : nodeslist){
-                                            if(node.getId() == Byte.toUnsignedInt(m.getData().get(5))){
+
+                                        for (Node node : nodeslist) {
+                                            if (node.getId() ==
+                                                    Byte.toUnsignedInt(m.getData().get(5))) {
                                                 nextHop = node.getNextHop();
                                             }
                                         }
+
                                         ByteBuffer ack = ByteBuffer.allocate(1);
                                         ack.put((byte) id);
                                         Message msg = createDataMessage(ack , (byte) 0b01000000, nextHop, Byte.toUnsignedInt(m.getData().get(5)));
@@ -333,39 +383,71 @@ public class MyProtocol{
                                         message.put(m.getData().get(i));
                                     }
                                     int nextHop = 0;
-                                    for(Node node : nodeslist){
-                                        if(node.getId() == Byte.toUnsignedInt(m.getData().get(3))){
+
+                                    for (Node node : nodeslist) {
+                                        if (node.getId() ==
+                                                Byte.toUnsignedInt(m.getData().get(3))) {
                                             nextHop = node.getNextHop();
                                         }
                                     }
+
                                     Message msg = createDataMessage( message, flags, nextHop, Byte.toUnsignedInt(m.getData().get(3)));
                                     nextMessage = msg;
                                 }
                             }
                         } else if ((flags & 0b11111111) == 0b10000000){
+                            //System.out.println("received new list message");
                             if(Byte.toUnsignedInt(m.getData().get(2)) == id) {
                                 Message msg = createAck(senderId);
                                 nextMessage = msg;
                             }
-                            for(int i = 6 ; i < m.getData().get(4) + 5 ; i++){
+                            for(int i = 6 ; i < m.getData().get(4) + 5 ; i+= 2){
                                 int node = Byte.toUnsignedInt(m.getData().get(i));
                                 boolean inList = false;
-                                for(Node node1 : nodeslist){
+
+                                for (Node node1 : nodeslist) {
                                     if (node1.getId() == node) {
                                         inList = true;
                                         break;
                                     }
                                 }
-                                if(!inList){
+                                if (!inList && Byte.toUnsignedInt(m.getData().get(i+1)) != id) {
                                     //System.out.println("found new node: " + node);
                                     Node node1 = new Node(node);
                                     node1.setNextHop(senderId);
                                     nodeslist.add(node1);
-                                } else {
-                                    //System.out.println("node: " + node + " is already in list");
+
                                 }
                             }
-                            if(Byte.toUnsignedInt(m.getData().get(2)) != id) {
+                            List<Node> removeList = new ArrayList<>();
+                            for(Node node : nodeslist){
+                                if(node.getNextHop() == senderId) {
+                                    boolean contains = false;
+                                    for (int i = 6; i < m.getData().get(4) + 5; i += 2) {
+                                        int node1 = Byte.toUnsignedInt(m.getData().get(i));
+
+                                        if (node.getId() == node1) {
+                                            contains = true;
+                                        }
+                                    }
+                                    if(!contains){
+                                        removeList.add(node);
+                                    }
+                                }
+
+                                for(Node node1 : nodeslist){
+                                    if(node.getNextHop() == node1.getId()){
+                                        if(node1.getLastHeard() == 0){
+                                            removeList.add(node);
+                                        }
+                                    }
+                                }
+
+                            }
+                            for (Node node : removeList){
+                                nodeslist.remove(node);
+                            }
+                            /*if(Byte.toUnsignedInt(m.getData().get(2)) != id) {
                                 int otherNodes = 0;
                                 for (Node node : nodeslist) {
                                     if (node.getNextHop() != m.getId() && node.getNextHop() != 0) {
@@ -386,18 +468,20 @@ public class MyProtocol{
                                         nextMessage = msg;
                                     }
                                 }
-                            }
+                            }*/
                         } else if(flags == 0b00010000){
                             //System.out.println("received broadcast");
                             if(m.getData().get(2) == 0 || Byte.toUnsignedInt( m.getData().get(2)) == id) {
                                 boolean process = false;
-                                for(Node node : nodeslist){
-                                    if(node.getId() == Byte.toUnsignedInt(m.getData().get(6))){
-                                        if(node.getNextHop() == senderId){
+
+                                for (Node node : nodeslist) {
+                                    if (node.getId() == Byte.toUnsignedInt(m.getData().get(6))) {
+                                        if (node.getNextHop() == senderId) {
                                             process = true;
                                         }
                                     }
                                 }
+
                                 if (m.getData().get(2) != 0) {
                                     Message msg = createAck(senderId);
                                     sendingQueue.put(msg);
@@ -413,9 +497,12 @@ public class MyProtocol{
                                     for (int i = 6; i < 6 + m.getData().get(5); i++) {
                                         nodes.add(Byte.toUnsignedInt(m.getData().get(i)));
                                     }
-                                    System.out.println(
-                                            "received new broadcast: " + message + " ,from node " +
-                                                    Byte.toUnsignedInt(m.getData().get(6)));
+                                    if(m != lastReceivedMessage) {
+                                        System.out.println("received new broadcast: " + message +
+                                                                   " ,from node " +
+                                                                   Byte.toUnsignedInt(m.getData().get(6)));
+                                        lastReceivedMessage = m;
+                                    }
 
                                     if (nodes.size() < nodeslist.size()) {
                                         //boolean shouldSend = true;
@@ -449,7 +536,8 @@ public class MyProtocol{
                                                                 sendingQueue.put(nextMessage);
                                                                 nextMessage = null;
                                                             }
-                                                        } else if (response.getType() == MessageType.BUSY) {
+                                                        } else if (response.getType() ==
+                                                                MessageType.BUSY) {
                                                             lastMessage = MessageType.BUSY;
                                                         }
                                                     }
@@ -467,6 +555,7 @@ public class MyProtocol{
                                             }
                                         }
                                     }
+
                                 }
                             }
                         }
@@ -478,6 +567,7 @@ public class MyProtocol{
                         if(flags != 0b01000000) {
                             boolean newNode = true;
                             boolean betterPath = false;
+
                             for (Node node : nodeslist) {
                                 if (node.getId() == senderId) {
                                     newNode = false;
@@ -490,6 +580,7 @@ public class MyProtocol{
                                 //System.out.println("new node: " + senderId);
                                 nodeslist.add(node);
                             }
+
                         }
 
                         if((flags >>> 7 & 1) == 1){
@@ -524,6 +615,7 @@ public class MyProtocol{
                                 }
                             }
                         }
+
                     } else if (m.getType() == MessageType.DONE_SENDING){
                         //System.out.println("DONE_SENDING");
                     } else if (m.getType() == MessageType.HELLO){
@@ -541,6 +633,59 @@ public class MyProtocol{
                 } catch (InterruptedException e){
                     System.err.println("Failed to take from queue: "+e);
                 }
+            }
+        }
+    }
+
+    public class keepAliveThread extends Thread{
+        public void run(){
+            int cooldown = (int) (Math.random() * 10000 + 15000);
+            while (true){
+                List<Node> removeList = new ArrayList<>();
+                for (Node node : nodeslist) {
+                    //System.out.println(node.getId() + " " + node.getLastHeard());
+                    if (node.getNextHop() == node.getId()) {
+                        if (node.getLastHeard() <= 0) {
+                            removeList.add(node);
+                        } else {
+                            node.setLastHeard(node.getLastHeard() - 1);
+                        }
+
+                    }
+
+                    boolean contains = false;
+                    for(Node node1 : nodeslist){
+                        if (node.getNextHop() == node1.getId() || node.getId() == id) {
+                            contains = true;
+                            break;
+                        }
+                    }
+                    if(!contains){
+                        removeList.add(node);
+                    }
+                }
+
+                for (Node node : removeList){
+                    nodeslist.remove(node);
+                }
+
+                //System.out.println("tetst");
+                //System.out.println(lastMessage);
+                if(lastMessage == MessageType.FREE || lastMessage == MessageType.TOKEN_ACCEPTED || lastMessage == null){
+                    Message msg = createListMessage(0,id);
+                    try {
+                        //System.out.println("sending keep alive");
+                        sendingQueue.put(msg);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+                try {
+                    Thread.sleep(cooldown);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                cooldown = (int) (Math.random() * 10000 + 15000);;
             }
         }
     }
