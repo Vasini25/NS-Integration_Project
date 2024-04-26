@@ -425,7 +425,6 @@ public class MyProtocol {
                                         }
                                     }
                                 }
-
                             }
                             for (Node node : removeList) {
                                 nodeslist.remove(node);
@@ -509,7 +508,6 @@ public class MyProtocol {
                                                             lastMessage == MessageType.FREE) {
                                                         sendingQueue.put(msg);
                                                         cooldown = (int) (Math.random() * 200) + 50;
-                                                        //System.out.println(cooldown);
                                                     }
                                                     if (cooldown > 0) {
                                                         cooldown--;
