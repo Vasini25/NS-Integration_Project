@@ -22,7 +22,7 @@ public class MyProtocol{
     // The port to connect to. 8954 for the simulation server.
     private static int SERVER_PORT = 8955;
     // The frequency to use.
-    private static int frequency = 3932;
+    private static int frequency = 3981;
 
     private int id =(int) (Math.random() * 254) + 1;
 
@@ -178,7 +178,11 @@ public class MyProtocol{
                                     b[i] = a.get(i);
                                 }
                                 msg = createBroadcast(toSend, b, 0);
-                                sendingQueue.put(msg);
+                                if(lastMessage == MessageType.FREE) {
+                                    sendingQueue.put(msg);
+                                } else {
+                                    nextMessage = msg;
+                                }
                             }
                         }
                     }
@@ -499,7 +503,7 @@ public class MyProtocol{
                                     }
                                     if(m != lastReceivedMessage) {
                                         System.out.println("received new broadcast: " + message +
-                                                                   " ,from node " +
+                                                                   ", from node " +
                                                                    Byte.toUnsignedInt(m.getData().get(6)));
                                         lastReceivedMessage = m;
                                     }
